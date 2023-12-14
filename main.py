@@ -71,7 +71,15 @@ def func(message):
         bot.send_message(message.chat.id, text="Вы вернулись в главное меню", reply_markup=markup)
     else:
         bot.send_message(message.chat.id, text="На такую комманду я не запрограммировал..")
-
+# if message.text=="Учитель":
+#         bot.send_message(message.chat.id, text="Введите свои учительский пароль: ")
+#         bot.register_next_step_handler(message, welcome )
+#       elif message.text=="Учитель":
+#         bot.send_message(message.chat.id, text="Введите свои ученический пароль: ")
+#         bot.register_next_step_handler(message, welcome )
+#       elif message.text=="Админ":
+#         bot.send_message(message.chat.id, text="Введите свои админский пароль: ")
+#         bot.register_next_step_handler(message, welcome )
 conn.commit()
 if __name__ == '__main__':
     bot.infinity_polling()
