@@ -125,3 +125,4 @@ INSERT INTO Admin(AdminID,Name,Surname) VALUES
 (1,'Sanzhar','Sagadibek'),
 (2,'Elzhas','Mamraev');
 
+SELECT Password FROM Accounts;
