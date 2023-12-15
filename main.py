@@ -6,12 +6,19 @@ conn=psycopg2.connect(host='localhost',
                       user='postgres',
                       password='1234567')
 cur=conn.cursor()
+cur1=conn.cursor()
 
+cur1.execute('SELECT role FROM Accounts')
 cur.execute('SELECT Password FROM Accounts')
 all_users = cur.fetchall()
+all_user=cur1.fetchall()
 gg = []
+user_status={}
 for i in all_users:
   gg.append(i[0])
+
+
+
 
 TOKEN = '6392060028:AAEVRZLwG3yJk2hNoxPR5MiNQNpofxRhaRM'
 
@@ -31,7 +38,7 @@ def start(message):
     bot.send_message(message.chat.id, text="Привет", reply_markup=markup)
 def welcome(message):
     if message.text in gg:
-      bot.send_message(message.chat.id, text="Добро пожаловать")
+      bot.send_message(message.chat.id, text="Вы авторизовались добро пожаловать")
     else:
       bot.send_message(message.chat.id, text="Пароль введен не правильно")
 
@@ -39,7 +46,7 @@ def welcome(message):
 @bot.message_handler(content_types=['text'])
 def func(message):
     if(message.text == "Поздороваться"):
-        bot.send_message(message.chat.id, text="Привеет.. Спасибо что читаешь статью!)")
+        bot.send_message(message.chat.id, text="Привеет!)")
     elif(message.text == "Задать вопрос"):
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         btn1 = types.KeyboardButton("Как тебя зовут?")
@@ -48,13 +55,30 @@ def func(message):
         markup.add(btn1, btn2, back)
         bot.send_message(message.chat.id, text="Задай мне вопрос", reply_markup=markup)
     elif(message.text=="Зарегестрироваться"):
-      bot.send_message(message.chat.id, text="Введите свои пароль: ")
+      bot.send_message(message.chat.id, text="Придумайте свои логин и пароль: ")
       bot.register_next_step_handler(message, welcome )
     elif(message.text=="Вход"):
+      bot.send_message(message.chat.id, text="Кто вы: ")
       markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-      bot.send_message(message.chat.id, text="Введите свои пароль: ")
-      bot.register_next_step_handler(message, welcome )
+      bttn1 = types.KeyboardButton("Учитель")
+      bttn2 = types.KeyboardButton("Ученик")
+      bttn3=types.KeyboardButton("Админ")
+      back1 = types.KeyboardButton("Вернуться в главное меню")
+      markup.add(bttn1, bttn2,bttn3, back1)
+      bot.send_message(message.chat.id, text="Идет проверка...", reply_markup=markup)
+    elif message.text =="Учитель":
+        bot.send_message(message.chat.id, text="Введите свои логин и пароль через запятую: ")
+        bot.register_next_step_handler(message,welcome)
+    elif message.text == "Ученик":
+      bot.send_message(message.chat.id, text="Введите свои логин и пароль через запятую: ")
+      bot.register_next_step_handler(message,welcome)  
+    elif message.text == "Админ":
+      bot.send_message(message.chat.id, text="Введите свои логин и пароль через запятую: ")
+      bot.register_next_step_handler(message,welcome)
       
+      
+
+
     elif(message.text == "Как тебя зовут?"):
         bot.send_message(message.chat.id, "Меня зовут Марат")
     
