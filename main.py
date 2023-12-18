@@ -46,11 +46,11 @@ def welcome(message):
 @bot.message_handler(content_types=['text'])
 def func(message):
     if(message.text == "Поздороваться"):
-        bot.send_message(message.chat.id, text="Привеет!)")
+        bot.send_message(message.chat.id, text="Здраствуйте")
     elif(message.text == "Задать вопрос"):
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         btn1 = types.KeyboardButton("Как тебя зовут?")
-        btn2 = types.KeyboardButton("Что я могу?")
+        btn2 = types.KeyboardButton("Что ты можешь?")
         back = types.KeyboardButton("Вернуться в главное меню")
         markup.add(btn1, btn2, back)
         bot.send_message(message.chat.id, text="Задай мне вопрос", reply_markup=markup)
@@ -82,8 +82,11 @@ def func(message):
     elif(message.text == "Как тебя зовут?"):
         bot.send_message(message.chat.id, "Меня зовут Марат")
     
-    elif message.text == "Что я могу?":
-        bot.send_message(message.chat.id, text="Поздороваться с читателями")
+    elif message.text == "Что ты можешь?":
+        bot.send_message(message.chat.id, text="1.Поздороваться с пользователем ")
+        bot.send_message(message.chat.id, text="2.Авторизовать ")
+        bot.send_message(message.chat.id, text="3.Ответить на предложенные вопросы ")
+        bot.send_message(message.chat.id, text="4.Выдать ошибку")
     
     elif (message.text == "Вернуться в главное меню"):
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -95,15 +98,7 @@ def func(message):
         bot.send_message(message.chat.id, text="Вы вернулись в главное меню", reply_markup=markup)
     else:
         bot.send_message(message.chat.id, text="На такую комманду я не запрограммировал..")
-# if message.text=="Учитель":
-#         bot.send_message(message.chat.id, text="Введите свои учительский пароль: ")
-#         bot.register_next_step_handler(message, welcome )
-#       elif message.text=="Учитель":
-#         bot.send_message(message.chat.id, text="Введите свои ученический пароль: ")
-#         bot.register_next_step_handler(message, welcome )
-#       elif message.text=="Админ":
-#         bot.send_message(message.chat.id, text="Введите свои админский пароль: ")
-#         bot.register_next_step_handler(message, welcome )
+
 conn.commit()
 if __name__ == '__main__':
     bot.infinity_polling()
