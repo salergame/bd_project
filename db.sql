@@ -119,10 +119,16 @@ CREATE TABLE Admin (
 );
 
 INSERT INTO Accounts(AccountsID,Login,Password,Role,Access) VALUES
-(1,'salergame07','Sanzh1942','admin_role','admin_True'),
-(2,'Elzhaskekmam','maika123','admin_role','admin_True');
+(1,'salergame07','Sanzh1942','Админ','admin_True'),
+(3,'kkk_1001','kk_101','Учитель','admin_False'),
+(4,'Random','ran','Студент','admin_False'),
+(2,'Elzhaskekmam','maika123','Админ','admin_True');
 INSERT INTO Admin(AdminID,Name,Surname) VALUES
 (1,'Sanzhar','Sagadibek'),
 (2,'Elzhas','Mamraev');
+INSERT INTO teachers(teacherID,Name,Surname) VALUES
+(1,'Kamron','Tulaboev');
+INSERT INTO students(studentID,Name,Surname) VALUES
+(1,'First','Firstss');
 
 SELECT Password FROM Accounts;
