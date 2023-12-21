@@ -11,9 +11,11 @@ class MyTelegramBot:
                                      password='1234567')
         self.cur = self.conn.cursor()
         self.cur.execute('SELECT Login, Password, role FROM Accounts')
+        self.cur1 = self.conn.cursor()
+        self.cur1.execute('SELECT Login, Password, role FROM Accounts')
         self.user_credentials = {row[0]: (row[1], row[2]) for row in self.cur.fetchall()}
         self.bot = telebot.TeleBot(self.token)
-        self.authenticated_users = {}  # Словарь для отслеживания аутентификации
+        self.authenticated_users = {}
 
         self.question_handler = QuestionHandler(self.bot, self)
         self.student_handler = StudentHandler(self.bot, self)
@@ -59,8 +61,7 @@ class MyTelegramBot:
                 if chat_id in self.authenticated_users:
                     self.authenticated_users.pop(chat_id, None)
                     self.bot.send_message(chat_id, text="Вы успешно вышли из аккаунта.")
-                    # Можно добавить дополнительные действия при выходе, если необходимо
-                    start(message)  # Возвращаемся в главное меню
+                    start(message)
             else:
                 self.question_handler.handle_question(message)
                 self.student_handler.handle_student(message)
@@ -76,11 +77,10 @@ class MyTelegramBot:
         login, password = map(str.strip, message.text.split(','))
 
         if login in self.user_credentials and self.user_credentials[login][0] == password:
-            self.authenticated_users[chat_id] = login  # Сохраняем логин пользователя
+            self.authenticated_users[chat_id] = login
             role = self.user_credentials[login][1]
             self.bot.send_message(chat_id, text=f"Вы успешно вошли в свой аккаунт с ролью {role}. Добро пожаловать!")
 
-            # После успешной аутентификации проверяем, является ли пользователь студентом
             if role == "Студент":
                 self.student_handler.handle_student_menu(message)
             elif role == "Учитель":
@@ -89,7 +89,7 @@ class MyTelegramBot:
                 self.admin_handler.handle_admin_menu(message)
 
         else:
-            self.authenticated_users[chat_id] = None  # Пользователь не прошел аутентификацию
+            self.authenticated_users[chat_id] = None
             self.bot.send_message(chat_id, text="Ошибка входа. Пожалуйста, проверьте логин и пароль.")
 
 class QuestionHandler:
@@ -121,13 +121,10 @@ class StudentHandler:
         self.my_bot = my_bot
 
     def handle_student(self, message):
-        # Обработка команд для студента
         if message.text == "Посмотреть предметы":
             self.bot.send_message(message.chat.id, text="Список ваших предметов:")
-            # Добавьте здесь логику для вывода предметов студента
 
     def handle_student_menu(self, message):
-        # Показать меню для студента
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         button1 = types.KeyboardButton("Посмотреть предметы")
         button2 = types.KeyboardButton("Выход")
@@ -141,11 +138,8 @@ class TeacherHandler:
         self.my_bot = my_bot
 
     def handle_teacher(self, message):
-        # Обработка команд для учителя
-        pass  # Добавьте здесь логику для команд учителя
-
+        pass 
     def handle_teacher_menu(self, message):
-        # Показать меню для учителя
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         button1 = types.KeyboardButton("Добавить оценку")
         button2 = types.KeyboardButton("Выход")
@@ -159,16 +153,17 @@ class AdminHandler:
         self.my_bot = my_bot
 
     def handle_admin(self, message):
-        # Обработка команд для администратора
-        pass  # Добавьте здесь логику для команд администратора
+        if message.text == 'Добавить пользователя':
+            self.bot.send_message(message.chat.id, text='Введите логин и пароль пользователя через запятую')
+            self.bot.send_message(message.chat.id, text='Введите роль пользователя')
 
     def handle_admin_menu(self, message):
-        # Показать меню для администратора
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         button1 = types.KeyboardButton("Добавить пользователя")
-        button2 = types.KeyboardButton("Выход")
+        button2 = types.KeyboardButton("Удалить пользователя")
+        button3 = types.KeyboardButton("Выход")
         back = types.KeyboardButton("Вернуться в главное меню")
-        markup.add(button1, button2, back)
+        markup.add(button1, button2,button3, back)
         self.bot.send_message(message.chat.id, text="Добро пожаловать, администратор!", reply_markup=markup)
 
 if __name__ == '__main__':
