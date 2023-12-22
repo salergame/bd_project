@@ -18,12 +18,13 @@ class MyTelegramBot:
         self.authenticated_users = {}
         self.cur1 = self.conn.cursor()
         self.cur2=self.conn.cursor()
+        self.cur3=self.conn.cursor()
 
         self.question_handler = QuestionHandler(self.bot, self)
         self.student_handler = StudentHandler(self.bot, self)
         self.teacher_handler = TeacherHandler(self.bot, self)
         
-        self.admin_handler = AdminHandler(self, self.cur1,self.cur2)
+        self.admin_handler = AdminHandler(self, self.cur1,self.cur2,self.cur3)
         
         
     def run(self):
@@ -150,11 +151,12 @@ class TeacherHandler:
         self.bot.send_message(message.chat.id, text="Добро пожаловать, учитель!", reply_markup=markup)
 
 class AdminHandler:
-    def __init__(self, my_bot, cur1,cur2):
+    def __init__(self, my_bot, cur1,cur2,cur3):
         self.my_bot = my_bot
         self.cur1 = cur1
         self.cur2=cur2
         self.delete_query = "DELETE FROM Accounts WHERE Login  = %s"
+        
         
 
     def handle_admin(self, message):
@@ -189,9 +191,9 @@ class AdminHandler:
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         button1 = types.KeyboardButton("Добавить пользователя")
         button2 = types.KeyboardButton("Удалить пользователя")
-        button3 = types.KeyboardButton("Выход")
+        button_exite = types.KeyboardButton("Выход")
         back = types.KeyboardButton("Вернуться в главное меню")
-        markup.add(button1, button2, button3, back)
+        markup.add(button1, button2,button_exite, back)
         self.my_bot.bot.send_message(message.chat.id, text="Добро пожаловать, администратор!", reply_markup=markup)
 
 if __name__ == '__main__':
