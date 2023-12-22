@@ -11,17 +11,21 @@ class MyTelegramBot:
                                      password='1234567')
         self.cur = self.conn.cursor()
         self.cur.execute('SELECT Login, Password, role FROM Accounts')
-        self.cur1 = self.conn.cursor()
-        self.cur1.execute('SELECT Login, Password, role FROM Accounts')
         self.user_credentials = {row[0]: (row[1], row[2]) for row in self.cur.fetchall()}
+        
         self.bot = telebot.TeleBot(self.token)
+        
         self.authenticated_users = {}
+        self.cur1 = self.conn.cursor()
+        self.cur2=self.conn.cursor()
 
         self.question_handler = QuestionHandler(self.bot, self)
         self.student_handler = StudentHandler(self.bot, self)
         self.teacher_handler = TeacherHandler(self.bot, self)
-        self.admin_handler = AdminHandler(self.bot, self)
-
+        
+        self.admin_handler = AdminHandler(self, self.cur1,self.cur2)
+        
+        
     def run(self):
         @self.bot.message_handler(commands=['start'])
         def start(message):
@@ -112,8 +116,6 @@ class QuestionHandler:
             button3 = types.KeyboardButton("Вход")
             markup.add(button1, button2, button3)
             self.bot.send_message(message.chat.id, text="Вы вернулись в главное меню", reply_markup=markup)
-        else:
-            self.bot.send_message(message.chat.id, text="На такую команду я не запрограммирована..")
 
 class StudentHandler:
     def __init__(self, bot, my_bot):
@@ -148,14 +150,40 @@ class TeacherHandler:
         self.bot.send_message(message.chat.id, text="Добро пожаловать, учитель!", reply_markup=markup)
 
 class AdminHandler:
-    def __init__(self, bot, my_bot):
-        self.bot = bot
+    def __init__(self, my_bot, cur1,cur2):
         self.my_bot = my_bot
+        self.cur1 = cur1
+        self.cur2=cur2
+        self.delete_query = "DELETE FROM Accounts WHERE Login  = %s"
+        
 
     def handle_admin(self, message):
         if message.text == 'Добавить пользователя':
-            self.bot.send_message(message.chat.id, text='Введите логин и пароль пользователя через запятую')
-            self.bot.send_message(message.chat.id, text='Введите роль пользователя')
+            self.my_bot.bot.send_message(message.chat.id, text='Введите логин и пароль а также роль пользователя через запятую')
+            self.my_bot.bot.register_next_step_handler(message, self.add_user)
+        elif message.text == 'Удалить пользователя':
+            self.my_bot.bot.send_message(message.chat.id, text='Введите логин')
+            self.my_bot.bot.register_next_step_handler(message, self.remove_user)
+            
+    def add_user(self, message):
+        try:
+            login, password, role = map(str.strip, message.text.split(','))
+            self.cur1.execute('INSERT INTO Accounts (login, password, role) VALUES (%s, %s, %s)', (login, password, role))
+            self.my_bot.conn.commit()
+            self.my_bot.bot.send_message(message.chat.id, text=f'Пользователь {login} успешно добавлен в базу данных.')
+        except:
+            self.my_bot.bot.send_message(message.chat.id, text=f'Ошибка при добавлении пользователя')
+
+
+    def remove_user(self,message):
+        try:
+            login = message.text.strip() 
+            self.cur2.execute(self.delete_query, (login,))
+            self.my_bot.conn.commit()
+            self.my_bot.bot.send_message(message.chat.id, text=f'Пользователь {login} успешно удален из базы данных')
+        except:
+            self.my_bot.bot.send_message(message.chat.id, text=f'Ошибка при удалении пользователя')
+
 
     def handle_admin_menu(self, message):
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -163,8 +191,8 @@ class AdminHandler:
         button2 = types.KeyboardButton("Удалить пользователя")
         button3 = types.KeyboardButton("Выход")
         back = types.KeyboardButton("Вернуться в главное меню")
-        markup.add(button1, button2,button3, back)
-        self.bot.send_message(message.chat.id, text="Добро пожаловать, администратор!", reply_markup=markup)
+        markup.add(button1, button2, button3, back)
+        self.my_bot.bot.send_message(message.chat.id, text="Добро пожаловать, администратор!", reply_markup=markup)
 
 if __name__ == '__main__':
     TOKEN = '6392060028:AAEVRZLwG3yJk2hNoxPR5MiNQNpofxRhaRM'
