@@ -10,22 +10,18 @@ class MyTelegramBot:
                                      user='postgres',
                                      password='1234567')
         self.cur = self.conn.cursor()
-        self.cur.execute('SELECT Login, Password, role FROM Accounts')
+        self.cur.execute('SELECT LOWER(Login), Password, role FROM Accounts')
         self.user_credentials = {row[0]: (row[1], row[2]) for row in self.cur.fetchall()}
         
         self.bot = telebot.TeleBot(self.token)
         
         self.authenticated_users = {}
-        self.cur1 = self.conn.cursor()
-        self.cur2=self.conn.cursor()
-        self.cur3=self.conn.cursor()
 
         self.question_handler = QuestionHandler(self.bot, self)
         self.student_handler = StudentHandler(self.bot, self)
         self.teacher_handler = TeacherHandler(self.bot, self)
         
-        self.admin_handler = AdminHandler(self, self.cur1,self.cur2,self.cur3)
-        
+        self.admin_handler = AdminHandler(self, self.cur, self.cur)
         
     def run(self):
         @self.bot.message_handler(commands=['start'])
@@ -68,10 +64,16 @@ class MyTelegramBot:
                     self.bot.send_message(chat_id, text="Вы успешно вышли из аккаунта.")
                     start(message)
             else:
+                if chat_id in self.authenticated_users:
+                    role = self.user_credentials[self.authenticated_users[chat_id]][1]
+                    if role == "Студент":
+                        self.student_handler.handle_student(message)
+                    elif role == "Учитель":
+                        self.teacher_handler.handle_teacher(message)
+                    elif role == "Админ":
+                        self.admin_handler.handle_admin(message)
+
                 self.question_handler.handle_question(message)
-                self.student_handler.handle_student(message)
-                self.teacher_handler.handle_teacher(message)
-                self.admin_handler.handle_admin(message)
 
         self.conn.commit()
         if __name__ == '__main__':
@@ -80,6 +82,9 @@ class MyTelegramBot:
     def authenticate(self, message):
         chat_id = message.chat.id
         login, password = map(str.strip, message.text.split(','))
+
+        # Приводим логин к нижнему регистру
+        login = login.lower()
 
         if login in self.user_credentials and self.user_credentials[login][0] == password:
             self.authenticated_users[chat_id] = login
@@ -141,23 +146,23 @@ class TeacherHandler:
         self.my_bot = my_bot
 
     def handle_teacher(self, message):
-        pass 
+        if message.text == 'Добавить оценку студенту':
+            self.bot.send_message(message.chat.id, text="Введите оценку студенту")
+
     def handle_teacher_menu(self, message):
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        button1 = types.KeyboardButton("Добавить оценку")
+        button1 = types.KeyboardButton("Добавить оценку студенту")
         button2 = types.KeyboardButton("Выход")
         back = types.KeyboardButton("Вернуться в главное меню")
         markup.add(button1, button2, back)
         self.bot.send_message(message.chat.id, text="Добро пожаловать, учитель!", reply_markup=markup)
 
 class AdminHandler:
-    def __init__(self, my_bot, cur1,cur2,cur3):
+    def __init__(self, my_bot, cur1, cur2):
         self.my_bot = my_bot
         self.cur1 = cur1
-        self.cur2=cur2
+        self.cur2 = cur2
         self.delete_query = "DELETE FROM Accounts WHERE Login  = %s"
-        
-        
 
     def handle_admin(self, message):
         if message.text == 'Добавить пользователя':
@@ -166,7 +171,7 @@ class AdminHandler:
         elif message.text == 'Удалить пользователя':
             self.my_bot.bot.send_message(message.chat.id, text='Введите логин')
             self.my_bot.bot.register_next_step_handler(message, self.remove_user)
-            
+
     def add_user(self, message):
         try:
             login, password, role = map(str.strip, message.text.split(','))
@@ -176,24 +181,22 @@ class AdminHandler:
         except:
             self.my_bot.bot.send_message(message.chat.id, text=f'Ошибка при добавлении пользователя')
 
-
-    def remove_user(self,message):
+    def remove_user(self, message):
         try:
-            login = message.text.strip() 
+            login = message.text.strip()
             self.cur2.execute(self.delete_query, (login,))
             self.my_bot.conn.commit()
             self.my_bot.bot.send_message(message.chat.id, text=f'Пользователь {login} успешно удален из базы данных')
         except:
             self.my_bot.bot.send_message(message.chat.id, text=f'Ошибка при удалении пользователя')
 
-
     def handle_admin_menu(self, message):
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         button1 = types.KeyboardButton("Добавить пользователя")
         button2 = types.KeyboardButton("Удалить пользователя")
-        button_exite = types.KeyboardButton("Выход")
+        button_exit = types.KeyboardButton("Выход")
         back = types.KeyboardButton("Вернуться в главное меню")
-        markup.add(button1, button2,button_exite, back)
+        markup.add(button1, button2, button_exit, back)
         self.my_bot.bot.send_message(message.chat.id, text="Добро пожаловать, администратор!", reply_markup=markup)
 
 if __name__ == '__main__':
