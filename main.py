@@ -19,9 +19,9 @@ class MyTelegramBot:
 
         self.question_handler = QuestionHandler(self.bot, self)
         self.student_handler = StudentHandler(self.bot, self)
-        self.teacher_handler = TeacherHandler(self.bot, self)
+        self.teacher_handler = TeacherHandler(self.bot, self, self.cur)
         
-        self.admin_handler = AdminHandler(self, self.cur, self.cur)
+        self.admin_handler = AdminHandler(self, self.cur, self.cur, self.cur,self.cur,self.cur)
         
     def run(self):
         @self.bot.message_handler(commands=['start'])
@@ -83,8 +83,7 @@ class MyTelegramBot:
         chat_id = message.chat.id
         login, password = map(str.strip, message.text.split(','))
 
-        # Приводим логин к нижнему регистру
-        login = login.lower()
+        
 
         if login in self.user_credentials and self.user_credentials[login][0] == password:
             self.authenticated_users[chat_id] = login
@@ -141,52 +140,119 @@ class StudentHandler:
         self.bot.send_message(message.chat.id, text="Добро пожаловать, студент!", reply_markup=markup)
 
 class TeacherHandler:
-    def __init__(self, bot, my_bot):
+    def __init__(self, bot, my_bot,cur3):
         self.bot = bot
         self.my_bot = my_bot
+        self.cur3=cur3
 
     def handle_teacher(self, message):
-        if message.text == 'Добавить оценку студенту':
-            self.bot.send_message(message.chat.id, text="Введите оценку студенту")
+        if message.text == 'Посмотреть журнал':
+            query = "SELECT Students.name, Ratings.grade FROM Students LEFT JOIN Ratings ON Students.studentid = Ratings.ratingid;"
+            
+            self.cur3.execute(query)
+            results = self.cur3.fetchall()
+
+            if results:
+                for row in results:
+                    student_name, grade = row
+                    self.bot.send_message(message.chat.id, f"{student_name}: {grade}")
+            else:
+                self.bot.send_message(message.chat.id, "Нет данных в журнале.")
+        elif message.text == 'Изменить оценку':
+            self.bot.send_message(message.chat.id, "Введите имя студента и новую оценку через запятую:")
+            self.bot.register_next_step_handler(message, self.handle_change_grade)
+
+
+
+    def handle_change_grade(self, message):
+        try:
+            student_name, new_grade = map(str.strip, message.text.split(','))
+            
+            update_query = "UPDATE Ratings SET grade = %s WHERE studentid = (SELECT studentid FROM Students WHERE name = %s) OR grade IS NULL;"
+            self.cur3.execute(update_query, (new_grade, student_name))
+            self.my_bot.conn.commit()
+            self.bot.send_message(message.chat.id, f"Оценка для студента {student_name} успешно изменена на {new_grade}.")
+        except:
+            self.bot.send_message(message.chat.id, "Ошибка при изменении оценки. Пожалуйста, проверьте ввод.")
 
     def handle_teacher_menu(self, message):
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        button1 = types.KeyboardButton("Добавить оценку студенту")
+        button1 = types.KeyboardButton("Посмотреть журнал")
+        button3 = types.KeyboardButton("Изменить оценку")
         button2 = types.KeyboardButton("Выход")
         back = types.KeyboardButton("Вернуться в главное меню")
-        markup.add(button1, button2, back)
+        markup.add(button1, button2, button3,back)
         self.bot.send_message(message.chat.id, text="Добро пожаловать, учитель!", reply_markup=markup)
 
 class AdminHandler:
-    def __init__(self, my_bot, cur1, cur2):
+    def __init__(self, my_bot, cur1, cur2, cur3):
         self.my_bot = my_bot
         self.cur1 = cur1
         self.cur2 = cur2
-        self.delete_query = "DELETE FROM Accounts WHERE Login  = %s"
+        self.cur3 = cur3
+        self.delete_query = "DELETE FROM Accounts WHERE Login = %s RETURNING role, accountsid;"
 
     def handle_admin(self, message):
         if message.text == 'Добавить пользователя':
-            self.my_bot.bot.send_message(message.chat.id, text='Введите логин и пароль а также роль пользователя через запятую')
+            self.my_bot.bot.send_message(message.chat.id, text='Введите логин, пароль и роль пользователя через запятую')
             self.my_bot.bot.register_next_step_handler(message, self.add_user)
         elif message.text == 'Удалить пользователя':
-            self.my_bot.bot.send_message(message.chat.id, text='Введите логин')
+            self.my_bot.bot.send_message(message.chat.id, text='Введите логин пользователя, которого хотите удалить:')
             self.my_bot.bot.register_next_step_handler(message, self.remove_user)
 
     def add_user(self, message):
         try:
             login, password, role = map(str.strip, message.text.split(','))
-            self.cur1.execute('INSERT INTO Accounts (login, password, role) VALUES (%s, %s, %s)', (login, password, role))
-            self.my_bot.conn.commit()
-            self.my_bot.bot.send_message(message.chat.id, text=f'Пользователь {login} успешно добавлен в базу данных.')
+            self.cur1.execute(
+                'INSERT INTO Accounts (login, password, role) VALUES (%s, %s, %s) RETURNING accountsid;', (login, password, role))
+            accounts_id = self.cur1.fetchone()[0]
+
+            if role == 'Студент' or role == 'Учитель':
+                self.my_bot.bot.send_message(message.chat.id, text='Введите имя, фамилию и дату рождения через запятую')
+                self.my_bot.bot.register_next_step_handler(message, lambda m: self.add_user_data(m, accounts_id, role))
+            else:
+                self.my_bot.conn.commit()
+                self.my_bot.bot.send_message(message.chat.id, text=f'Пользователь {login} успешно добавлен в базу данных.')
+
         except:
+            self.my_bot.conn.rollback()
+            self.my_bot.bot.send_message(message.chat.id, text=f'Ошибка при добавлении пользователя')
+
+    def add_user_data(self, message, accounts_id, role):
+        try:
+            name, surname, date_of_birth = map(str.strip, message.text.split(','))
+
+            if role == 'Студент':
+                self.cur2.execute(
+                    'INSERT INTO Students (name, surname, dateofbirth, accountsid) VALUES (%s, %s, %s, %s);',
+                    (name, surname, date_of_birth, accounts_id))
+            elif role == 'Учитель':
+                self.cur3.execute(
+                    'INSERT INTO Teachers (name, surname, dateofbirth, accountsid) VALUES (%s, %s, %s, %s);',
+                    (name, surname, date_of_birth, accounts_id))
+
+            self.my_bot.conn.commit()
+            self.my_bot.bot.send_message(message.chat.id, text=f'Пользователь {name} {surname} успешно добавлен в базу данных.')
+        except:
+            self.my_bot.conn.rollback()
             self.my_bot.bot.send_message(message.chat.id, text=f'Ошибка при добавлении пользователя')
 
     def remove_user(self, message):
         try:
             login = message.text.strip()
-            self.cur2.execute(self.delete_query, (login,))
-            self.my_bot.conn.commit()
-            self.my_bot.bot.send_message(message.chat.id, text=f'Пользователь {login} успешно удален из базы данных')
+            result = self.cur2.execute(self.delete_query, (login,))
+            result = self.cur2.fetchone()
+            if result:
+                role, accounts_id = result
+                if role == 'Студент':
+                    self.cur2.execute('DELETE FROM Students WHERE accountsid = %s;', (accounts_id,))
+                elif role == 'Учитель':
+                    self.cur3.execute('DELETE FROM Teachers WHERE accountsid = %s;', (accounts_id,))
+
+                self.my_bot.conn.commit()
+                self.my_bot.bot.send_message(message.chat.id, text=f'Пользователь {login} успешно удален из базы данных')
+            else:
+                self.my_bot.bot.send_message(message.chat.id, text=f'Пользователь {login} не найден')
         except:
             self.my_bot.bot.send_message(message.chat.id, text=f'Ошибка при удалении пользователя')
 
