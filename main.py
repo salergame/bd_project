@@ -1,6 +1,7 @@
 import telebot
 from telebot import types
 import psycopg2
+import datetime
 
 class MyTelegramBot:
     def __init__(self, token):
@@ -21,7 +22,9 @@ class MyTelegramBot:
         self.student_handler = StudentHandler(self.bot, self)
         self.teacher_handler = TeacherHandler(self.bot, self, self.cur)
         
-        self.admin_handler = AdminHandler(self, self.cur, self.cur, self.cur,self.cur,self.cur)
+        self.admin_handler = AdminHandler(self, self.cur, self.cur, self.cur)
+
+
         
     def run(self):
         @self.bot.message_handler(commands=['start'])
@@ -147,7 +150,7 @@ class TeacherHandler:
 
     def handle_teacher(self, message):
         if message.text == 'Посмотреть журнал':
-            query = "SELECT Students.name, Ratings.grade FROM Students LEFT JOIN Ratings ON Students.studentid = Ratings.ratingid;"
+            query = "SELECT Students.name, Ratings.grade FROM Students LEFT JOIN Ratings ON Students.studentid = Ratings.studentid;"
             
             self.cur3.execute(query)
             results = self.cur3.fetchall()
@@ -199,41 +202,82 @@ class AdminHandler:
         elif message.text == 'Удалить пользователя':
             self.my_bot.bot.send_message(message.chat.id, text='Введите логин пользователя, которого хотите удалить:')
             self.my_bot.bot.register_next_step_handler(message, self.remove_user)
+        elif message.text == 'Добавить студента':
+            self.my_bot.bot.send_message(message.chat.id, text='Введите имя, фамилию и дату рождения студента через запятую (формат: YYYY-MM-DD):')
+            self.my_bot.bot.register_next_step_handler(message, self.add_student)
+        elif message.text == 'Добавить учителя':
+            self.my_bot.bot.send_message(message.chat.id, text='Введите имя, фамилию, дату рождения и факультет учителя через запятую (формат: YYYY-MM-DD):')
+            self.my_bot.bot.register_next_step_handler(message, self.add_teacher)
 
+    def add_student(self, message):
+        try:
+            name, surname, dob_str = map(str.strip, message.text.split(','))
+            
+            # Проверка формата даты
+            try:
+                dob = datetime.datetime.strptime(dob_str, "%Y-%m-%d").date()
+            except ValueError:
+                self.my_bot.bot.send_message(message.chat.id, text='Неверный формат даты. Используйте формат: YYYY-MM-DD.')
+                return
+            
+            self.cur1.execute(
+                'INSERT INTO Students (Name, Surname, DateOfBirth) VALUES (%s, %s, %s) RETURNING StudentID;',
+                (name, surname, dob)
+            )
+            
+            # Коммит перед возвратом
+            self.my_bot.conn.commit()
+            student_id = self.cur1.fetchone()[0]
+
+            self.my_bot.bot.send_message(message.chat.id, text=f'Студент {name} успешно добавлен в базу данных с ID {student_id}.')
+
+        except Exception as e:
+            print(e)
+            self.my_bot.conn.rollback()
+            self.my_bot.bot.send_message(message.chat.id, text='Ошибка при добавлении студента')
+
+    def add_teacher(self, message):
+        try:
+            name, surname, dob_str, faculty_name = map(str.strip, message.text.split(','))
+            
+            # Проверка формата даты
+            try:
+                dob = datetime.datetime.strptime(dob_str, "%Y-%m-%d").date()
+            except ValueError:
+                self.my_bot.bot.send_message(message.chat.id, text='Неверный формат даты. Используйте формат: YYYY-MM-DD.')
+                return
+            
+            self.cur1.execute('SELECT FacultyID FROM Faculties WHERE FacultyName = %s;', (faculty_name,))
+            faculty_id = self.cur1.fetchone()
+            
+            if faculty_id:
+                faculty_id = faculty_id[0]
+                self.cur2.execute(
+                    'INSERT INTO Teachers (Name, Surname, DateOfBirth, FacultyID) VALUES (%s, %s, %s, %s) RETURNING TeacherID;',
+                    (name, surname, dob, faculty_id))
+                teacher_id = self.cur2.fetchone()[0]
+
+                self.my_bot.conn.commit()
+                self.my_bot.bot.send_message(message.chat.id, text=f'Учитель {name} успешно добавлен в базу данных с ID {teacher_id}.')
+            else:
+                self.my_bot.bot.send_message(message.chat.id, text=f'Факультет {faculty_name} не найден.')
+
+        except Exception as e:
+            print(e)
+            self.my_bot.conn.rollback()
+            self.my_bot.bot.send_message(message.chat.id, text='Ошибка при добавлении учителя')
+    
     def add_user(self, message):
         try:
             login, password, role = map(str.strip, message.text.split(','))
-            self.cur1.execute(
-                'INSERT INTO Accounts (login, password, role) VALUES (%s, %s, %s) RETURNING accountsid;', (login, password, role))
+            self.cur1.execute('INSERT INTO Accounts (login, password, role) VALUES (%s, %s, %s) RETURNING accountsid;', (login, password, role))
             accounts_id = self.cur1.fetchone()[0]
 
-            if role == 'Студент' or role == 'Учитель':
-                self.my_bot.bot.send_message(message.chat.id, text='Введите имя, фамилию и дату рождения через запятую')
-                self.my_bot.bot.register_next_step_handler(message, lambda m: self.add_user_data(m, accounts_id, role))
-            else:
-                self.my_bot.conn.commit()
-                self.my_bot.bot.send_message(message.chat.id, text=f'Пользователь {login} успешно добавлен в базу данных.')
-
-        except:
-            self.my_bot.conn.rollback()
-            self.my_bot.bot.send_message(message.chat.id, text=f'Ошибка при добавлении пользователя')
-
-    def add_user_data(self, message, accounts_id, role):
-        try:
-            name, surname, date_of_birth = map(str.strip, message.text.split(','))
-
-            if role == 'Студент':
-                self.cur2.execute(
-                    'INSERT INTO Students (name, surname, dateofbirth, accountsid) VALUES (%s, %s, %s, %s);',
-                    (name, surname, date_of_birth, accounts_id))
-            elif role == 'Учитель':
-                self.cur3.execute(
-                    'INSERT INTO Teachers (name, surname, dateofbirth, accountsid) VALUES (%s, %s, %s, %s);',
-                    (name, surname, date_of_birth, accounts_id))
-
             self.my_bot.conn.commit()
-            self.my_bot.bot.send_message(message.chat.id, text=f'Пользователь {name} {surname} успешно добавлен в базу данных.')
-        except:
+            self.my_bot.bot.send_message(message.chat.id, text=f'Пользователь {login} успешно добавлен в базу данных.')
+
+        except Exception as e:
+            print(e)
             self.my_bot.conn.rollback()
             self.my_bot.bot.send_message(message.chat.id, text=f'Ошибка при добавлении пользователя')
 
@@ -253,17 +297,21 @@ class AdminHandler:
                 self.my_bot.bot.send_message(message.chat.id, text=f'Пользователь {login} успешно удален из базы данных')
             else:
                 self.my_bot.bot.send_message(message.chat.id, text=f'Пользователь {login} не найден')
-        except:
+        except Exception as e:
+            print(e)
             self.my_bot.bot.send_message(message.chat.id, text=f'Ошибка при удалении пользователя')
 
     def handle_admin_menu(self, message):
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         button1 = types.KeyboardButton("Добавить пользователя")
         button2 = types.KeyboardButton("Удалить пользователя")
+        button3 = types.KeyboardButton("Добавить студента")
+        button4 = types.KeyboardButton("Добавить учителя")
         button_exit = types.KeyboardButton("Выход")
         back = types.KeyboardButton("Вернуться в главное меню")
-        markup.add(button1, button2, button_exit, back)
+        markup.add(button1, button2, button3, button4, button_exit, back)
         self.my_bot.bot.send_message(message.chat.id, text="Добро пожаловать, администратор!", reply_markup=markup)
+
 
 if __name__ == '__main__':
     TOKEN = '6392060028:AAEVRZLwG3yJk2hNoxPR5MiNQNpofxRhaRM'
