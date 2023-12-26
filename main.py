@@ -20,8 +20,7 @@ class MyTelegramBot:
 
         self.question_handler = QuestionHandler(self.bot, self)
         self.student_handler = StudentHandler(self.bot, self)
-        self.teacher_handler = TeacherHandler(self.bot, self, self.cur)
-        
+        self.teacher_handler = TeacherHandler(self.bot, self, self.cur, self.cur)        
         self.admin_handler = AdminHandler(self, self.cur, self.cur, self.cur,self.cur)
 
 
@@ -91,19 +90,35 @@ class MyTelegramBot:
         if login in self.user_credentials and self.user_credentials[login][0] == password:
             self.authenticated_users[chat_id] = login
             role = self.user_credentials[login][1]
-            self.bot.send_message(chat_id, text=f"Вы успешно вошли в свой аккаунт с ролью {role}. Добро пожаловать!")
+            
 
             if role == "Студент":
                 self.student_handler.handle_student_menu(message)
             elif role == "Учитель":
-                self.teacher_handler.handle_teacher_menu(message)
+                teacher_id, subject_id, subject_name = self.get_teacher_info(login)
+                self.bot.send_message(chat_id, text=f"Вы успешно вошли в свой аккаунт с ролью {role}.")
+                self.teacher_handler.handle_teacher_menu(message, subject_id)
             elif role == "Админ":
                 self.admin_handler.handle_admin_menu(message)
 
         else:
             self.authenticated_users[chat_id] = None
             self.bot.send_message(chat_id, text="Ошибка входа. Пожалуйста, проверьте логин и пароль.")
-
+    def get_teacher_info(self, login):
+        query = """
+            SELECT Teachers.TeacherID, Items.ItemID, Items.ItemName
+            FROM Teachers
+            JOIN Items ON Teachers.ItemID = Items.ItemID
+            JOIN Accounts ON Teachers.AccountsID = Accounts.AccountsID
+            WHERE Accounts.Login = %s;
+        """
+        self.cur.execute(query, (login,))
+        result = self.cur.fetchone()
+        if result:
+            teacher_id, subject_id, subject_name = result
+            return teacher_id, subject_id, subject_name
+        else:
+            return None, None, None
 class QuestionHandler:
     def __init__(self, bot, my_bot):
         self.bot = bot
@@ -143,34 +158,47 @@ class StudentHandler:
         self.bot.send_message(message.chat.id, text="Добро пожаловать, студент!", reply_markup=markup)
 
 class TeacherHandler:
-    def __init__(self, bot, my_bot,cur3):
+    def __init__(self, bot, my_bot, cur3, cur5):
         self.bot = bot
         self.my_bot = my_bot
-        self.cur3=cur3
+        self.cur3 = cur3
+        self.cur5 = cur5
 
     def handle_teacher(self, message):
-        if message.text == 'Посмотреть журнал':
-            query = "SELECT Students.name, Ratings.grade FROM Students LEFT JOIN Ratings ON Students.studentid = Ratings.studentid;"
-            
-            self.cur3.execute(query)
-            results = self.cur3.fetchall()
+        teacher_id, subject_id, unused = self.my_bot.get_teacher_info(self.my_bot.authenticated_users[message.chat.id])
 
-            if results:
-                for row in results:
-                    student_name, grade = row
-                    self.bot.send_message(message.chat.id, f"{student_name}: {grade}")
+        if message.text == 'Посмотреть журнал':
+            if subject_id:
+                query = "SELECT Students.name, Ratings.grade FROM Students " \
+                        "LEFT JOIN Ratings ON Students.studentid = Ratings.studentid " \
+                        "WHERE Ratings.itemid IN (SELECT Items.ItemID FROM Items WHERE Items.ItemID = %s);"
+                self.cur3.execute(query, (subject_id,))
+                results = self.cur3.fetchall()
+
+                if results:
+                    for row in results:
+                        student_name, grade = row
+                        self.bot.send_message(message.chat.id, f"{student_name}: {grade}")
+                else:
+                    self.bot.send_message(message.chat.id, "Нет данных в журнале.")
             else:
-                self.bot.send_message(message.chat.id, "Нет данных в журнале.")
+                self.bot.send_message(message.chat.id, "Учитель не связан ни с одним предметом. Обратитесь к администратору.")
         elif message.text == 'Изменить оценку':
             self.bot.send_message(message.chat.id, "Введите имя студента и новую оценку через запятую:")
             self.bot.register_next_step_handler(message, self.handle_change_grade)
-
-
+        elif message.text == 'Посмотреть оценки студента':
+            self.bot.send_message(message.chat.id, "Введите ID студента для просмотра оценок:")
+            self.bot.register_next_step_handler(message, self.handle_view_student_grades)
+        elif message.text == 'Выход':
+            self.my_bot.bot.send_message(message.chat.id, "Выход")
+        else:
+           
+            pass
 
     def handle_change_grade(self, message):
         try:
             student_name, new_grade = map(str.strip, message.text.split(','))
-            
+
             update_query = "UPDATE Ratings SET grade = %s WHERE studentid = (SELECT studentid FROM Students WHERE name = %s) OR grade IS NULL;"
             self.cur3.execute(update_query, (new_grade, student_name))
             self.my_bot.conn.commit()
@@ -178,14 +206,19 @@ class TeacherHandler:
         except:
             self.bot.send_message(message.chat.id, "Ошибка при изменении оценки. Пожалуйста, проверьте ввод.")
 
-    def handle_teacher_menu(self, message):
+    def handle_view_student_grades(self, message):
+        pass
+
+    def handle_teacher_menu(self, message, subject_id):
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         button1 = types.KeyboardButton("Посмотреть журнал")
         button3 = types.KeyboardButton("Изменить оценку")
+        button4 = types.KeyboardButton("Посмотреть оценки студента")
         button2 = types.KeyboardButton("Выход")
         back = types.KeyboardButton("Вернуться в главное меню")
-        markup.add(button1, button2, button3,back)
+        markup.add(button1, button2, button3, button4, back)
         self.bot.send_message(message.chat.id, text="Добро пожаловать, учитель!", reply_markup=markup)
+
 
 class AdminHandler:
     def __init__(self, my_bot, cur1, cur2, cur3,cur4):
@@ -273,8 +306,6 @@ class AdminHandler:
             self.my_bot.conn.commit()
             accounts_id = self.cur1.fetchone()[0]
             self.my_bot.bot.send_message(message.chat.id, text=f'Пользователь {login} успешно добавлен в базу данных.')
-            
-            
 
         except Exception as e:
             print(e)
