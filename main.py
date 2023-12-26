@@ -11,20 +11,23 @@ class MyTelegramBot:
                                      user='postgres',
                                      password='1234567')
         self.cur = self.conn.cursor()
+        self.cur1 = self.conn.cursor()
+        self.cur2 = self.conn.cursor()
+        self.cur3 = self.conn.cursor()
+        self.cur4 = self.conn.cursor()
+
         self.cur.execute('SELECT LOWER(Login), Password, role FROM Accounts')
         self.user_credentials = {row[0]: (row[1], row[2]) for row in self.cur.fetchall()}
-        
+
         self.bot = telebot.TeleBot(self.token)
-        
+
         self.authenticated_users = {}
 
         self.question_handler = QuestionHandler(self.bot, self)
         self.student_handler = StudentHandler(self.bot, self)
-        self.teacher_handler = TeacherHandler(self.bot, self, self.cur, self.cur)        
-        self.admin_handler = AdminHandler(self, self.cur, self.cur, self.cur,self.cur)
+        self.teacher_handler = TeacherHandler(self.bot, self, self.cur, self.cur)
+        self.admin_handler = AdminHandler(self, self.cur1, self.cur2, self.cur3, self.cur4)
 
-
-        
     def run(self):
         @self.bot.message_handler(commands=['start'])
         def start(message):
@@ -53,13 +56,20 @@ class MyTelegramBot:
                     self.bot.send_message(chat_id, text="Введите свой логин и пароль через запятую: ")
                     self.bot.register_next_step_handler(message, self.authenticate)
                 else:
+                    # Пользователь уже аутентифицирован, перенаправляем в соответствующее меню
                     role = self.user_credentials[self.authenticated_users[chat_id]][1]
                     if role == "Студент":
                         self.student_handler.handle_student_menu(message)
                     elif role == "Учитель":
-                        self.teacher_handler.handle_teacher_menu(message)
+                        # Проверяем, предоставил ли учитель информацию о предмете во время предыдущего входа
+                        if chat_id not in self.teacher_handler.subject_info:
+                            self.teacher_handler.handle_teacher_menu(message)
+                        else:
+                            subject_id = self.teacher_handler.subject_info[chat_id]
+                            self.teacher_handler.handle_teacher_menu(message, subject_id)
                     elif role == "Админ":
                         self.admin_handler.handle_admin_menu(message)
+
             elif message.text == "Выход":
                 if chat_id in self.authenticated_users:
                     self.authenticated_users.pop(chat_id, None)
@@ -85,12 +95,9 @@ class MyTelegramBot:
         chat_id = message.chat.id
         login, password = map(str.strip, message.text.split(','))
 
-        
-
         if login in self.user_credentials and self.user_credentials[login][0] == password:
             self.authenticated_users[chat_id] = login
             role = self.user_credentials[login][1]
-            
 
             if role == "Студент":
                 self.student_handler.handle_student_menu(message)
@@ -102,8 +109,23 @@ class MyTelegramBot:
                 self.admin_handler.handle_admin_menu(message)
 
         else:
-            self.authenticated_users[chat_id] = None
-            self.bot.send_message(chat_id, text="Ошибка входа. Пожалуйста, проверьте логин и пароль.")
+            # Попробуйте найти пользователя в динамике
+            if login in self.user_credentials:
+                self.authenticated_users[chat_id] = login
+                role = self.user_credentials[login][1]
+
+                if role == "Студент":
+                    self.student_handler.handle_student_menu(message)
+                elif role == "Учитель":
+                    teacher_id, subject_id, subject_name = self.get_teacher_info(login)
+                    self.bot.send_message(chat_id, text=f"Вы успешно вошли в свой аккаунт с ролью {role}.")
+                    self.teacher_handler.handle_teacher_menu(message, subject_id)
+                elif role == "Админ":
+                    self.admin_handler.handle_admin_menu(message)
+            else:
+                self.authenticated_users[chat_id] = None
+                self.bot.send_message(chat_id, text="Ошибка входа. Пожалуйста, проверьте логин и пароль.")
+
     def get_teacher_info(self, login):
         query = """
             SELECT Teachers.TeacherID, Items.ItemID, Items.ItemName
@@ -119,8 +141,10 @@ class MyTelegramBot:
             return teacher_id, subject_id, subject_name
         else:
             return None, None, None
+
+
 class QuestionHandler:
-    def __init__(self, bot, my_bot):
+    def __init__(self,bot, my_bot):
         self.bot = bot
         self.my_bot = my_bot
 
@@ -128,10 +152,8 @@ class QuestionHandler:
         if message.text == "Как тебя зовут?":
             self.bot.send_message(message.chat.id, "Меня зовут Марат")
         elif message.text == "Что ты можешь?":
-            self.bot.send_message(message.chat.id, text="1. Поздороваться с пользователем ")
-            self.bot.send_message(message.chat.id, text="2. Авторизовать ")
-            self.bot.send_message(message.chat.id, text="3. Ответить на предложенные вопросы ")
-            self.bot.send_message(message.chat.id, text="4. Выдать ошибку")
+            self.bot.send_message(message.chat.id, text="В зависемости от вашей роли")
+
         elif message.text == "Вернуться в главное меню":
             markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
             button1 = types.KeyboardButton("Поздороваться")
@@ -163,6 +185,7 @@ class TeacherHandler:
         self.my_bot = my_bot
         self.cur3 = cur3
         self.cur5 = cur5
+        self.subject_info = {}
 
     def handle_teacher(self, message):
         teacher_id, subject_id, unused = self.my_bot.get_teacher_info(self.my_bot.authenticated_users[message.chat.id])
@@ -192,7 +215,6 @@ class TeacherHandler:
         elif message.text == 'Выход':
             self.my_bot.bot.send_message(message.chat.id, "Выход")
         else:
-           
             pass
 
     def handle_change_grade(self, message):
@@ -221,13 +243,20 @@ class TeacherHandler:
 
 
 class AdminHandler:
-    def __init__(self, my_bot, cur1, cur2, cur3,cur4):
+    def __init__(self, my_bot, cur1, cur2, cur3, cur4):
         self.my_bot = my_bot
         self.cur1 = cur1
         self.cur2 = cur2
         self.cur3 = cur3
-        self.cur4=cur4
+        self.cur4 = cur4
         self.delete_query = "DELETE FROM Accounts WHERE Login = %s RETURNING role, accountsid;"
+
+    def get_users_list(self):
+        users = self.my_bot.user_credentials
+
+        users_info = "\n".join([f"{login}, {user[1][1]}" for login, user in users.items()])
+
+        return users_info
 
     def handle_admin(self, message):
         if message.text == 'Добавить пользователя':
@@ -236,28 +265,52 @@ class AdminHandler:
         elif message.text == 'Удалить пользователя':
             self.my_bot.bot.send_message(message.chat.id, text='Введите логин пользователя, которого хотите удалить:')
             self.my_bot.bot.register_next_step_handler(message, self.remove_user)
-        elif message.text == 'Добавить студента':
-            self.my_bot.bot.send_message(message.chat.id, text='Введите имя, фамилию и дату рождения студента через запятую (формат: YYYY-MM-DD):')
-            self.my_bot.bot.register_next_step_handler(message, self.add_student)
-        elif message.text == 'Добавить учителя':
-            self.my_bot.bot.send_message(message.chat.id, text='Введите имя, фамилию, дату рождения и факультет учителя через запятую (формат: YYYY-MM-DD):')
-            self.my_bot.bot.register_next_step_handler(message, self.add_teacher)
-
-    def add_student(self, message):
+    
+    def add_teacher(self, message, accounts_id):
         try:
-            name, surname, dob_str = map(str.strip, message.text.split(','))
-            
+            name, surname, faculty_name, subject_id, optional_id = map(str.strip, message.text.split(','))
+
+            self.cur1.execute('SELECT FacultyID FROM Faculties WHERE FacultyName = %s;', (faculty_name,))
+            faculty_id = self.cur1.fetchone()
+
+            if faculty_id:
+                faculty_id = faculty_id[0]
+
+                self.cur2.execute(
+                    'INSERT INTO Teachers (Name, Surname, FacultyID, AccountsID) VALUES (%s, %s, %s, %s) RETURNING TeacherID;',
+                    (name, surname, faculty_id, accounts_id)
+                )
+                teacher_id = self.cur2.fetchone()[0]
+
+                self.cur3.execute(
+                    'INSERT INTO TeachersSubjects (TeacherID, SubjectID, OptionalID) VALUES %s;', [(teacher_id, subject_id, optional_id)])
+
+                self.my_bot.conn.commit()
+                self.my_bot.bot.send_message(message.chat.id,
+                                            text=f'Учитель {name} успешно добавлен в базу данных с ID {teacher_id}.')
+            else:
+                self.my_bot.bot.send_message(message.chat.id, text=f'Факультет {faculty_name} не найден.')
+
+        except Exception as e:
+            print(e)
+            self.my_bot.conn.rollback()
+            self.my_bot.bot.send_message(message.chat.id, text='Ошибка при добавлении учителя')
+
+    def add_student(self, message, accounts_id):
+        try:
+            name, surname, dob_str, optional_id = map(str.strip, message.text.split(','))
+
             try:
                 dob = datetime.datetime.strptime(dob_str, "%Y-%m-%d").date()
             except ValueError:
                 self.my_bot.bot.send_message(message.chat.id, text='Неверный формат даты. Используйте формат: YYYY-MM-DD.')
                 return
-            
+
             self.cur1.execute(
-                'INSERT INTO Students (Name, Surname, DateOfBirth) VALUES (%s, %s, %s) RETURNING StudentID;',
-                (name, surname, dob)
+                'INSERT INTO Students (Name, Surname, DateOfBirth, OptionalID, AccountsID) VALUES (%s, %s, %s, %s, %s) RETURNING StudentID;',
+                (name, surname, dob, optional_id, accounts_id)
             )
-            
+
             self.my_bot.conn.commit()
             student_id = self.cur1.fetchone()[0]
 
@@ -268,43 +321,16 @@ class AdminHandler:
             self.my_bot.conn.rollback()
             self.my_bot.bot.send_message(message.chat.id, text='Ошибка при добавлении студента')
 
-    def add_teacher(self, message):
-        try:
-            name, surname, dob_str, faculty_name = map(str.strip, message.text.split(','))
-            
-            # Проверка формата даты
-            try:
-                dob = datetime.datetime.strptime(dob_str, "%Y-%m-%d").date()
-            except ValueError:
-                self.my_bot.bot.send_message(message.chat.id, text='Неверный формат даты. Используйте формат: YYYY-MM-DD.')
-                return
-            
-            self.cur1.execute('SELECT FacultyID FROM Faculties WHERE FacultyName = %s;', (faculty_name,))
-            faculty_id = self.cur1.fetchone()
-            
-            if faculty_id:
-                faculty_id = faculty_id[0]
-                self.cur2.execute(
-                    'INSERT INTO Teachers (Name, Surname, DateOfBirth, FacultyID) VALUES (%s, %s, %s, %s) RETURNING TeacherID;',
-                    (name, surname, dob, faculty_id))
-                teacher_id = self.cur2.fetchone()[0]
 
-                self.my_bot.conn.commit()
-                self.my_bot.bot.send_message(message.chat.id, text=f'Учитель {name} успешно добавлен в базу данных с ID {teacher_id}.')
-            else:
-                self.my_bot.bot.send_message(message.chat.id, text=f'Факультет {faculty_name} не найден.')
-
-        except Exception as e:
-            print(e)
-            self.my_bot.conn.rollback()
-            self.my_bot.bot.send_message(message.chat.id, text='Ошибка при добавлении учителя')
-    
     def add_user(self, message):
         try:
             login, password, role = map(str.strip, message.text.split(','))
             self.cur1.execute('INSERT INTO Accounts (login, password, role) VALUES (%s, %s, %s) RETURNING accountsid;', (login, password, role))
             self.my_bot.conn.commit()
             accounts_id = self.cur1.fetchone()[0]
+
+            self.my_bot.user_credentials[login] = (password, role)
+
             self.my_bot.bot.send_message(message.chat.id, text=f'Пользователь {login} успешно добавлен в базу данных.')
 
         except Exception as e:
@@ -319,11 +345,6 @@ class AdminHandler:
             result = self.cur2.fetchone()
             if result:
                 role, accounts_id = result
-                if role == 'Студент':
-                    self.cur2.execute('DELETE FROM Students WHERE accountsid = %s;', (accounts_id,))
-                elif role == 'Учитель':
-                    self.cur3.execute('DELETE FROM Teachers WHERE accountsid = %s;', (accounts_id,))
-
                 self.my_bot.conn.commit()
                 self.my_bot.bot.send_message(message.chat.id, text=f'Пользователь {login} успешно удален из базы данных')
             else:
@@ -336,11 +357,9 @@ class AdminHandler:
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         button1 = types.KeyboardButton("Добавить пользователя")
         button2 = types.KeyboardButton("Удалить пользователя")
-        button3 = types.KeyboardButton("Добавить студента")
-        button4 = types.KeyboardButton("Добавить учителя")
         button_exit = types.KeyboardButton("Выход")
         back = types.KeyboardButton("Вернуться в главное меню")
-        markup.add(button1, button2, button3, button4, button_exit, back)
+        markup.add(button1, button2, button_exit, back)
         self.my_bot.bot.send_message(message.chat.id, text="Добро пожаловать, администратор!", reply_markup=markup)
 
 
