@@ -22,7 +22,7 @@ class MyTelegramBot:
         self.student_handler = StudentHandler(self.bot, self)
         self.teacher_handler = TeacherHandler(self.bot, self, self.cur)
         
-        self.admin_handler = AdminHandler(self, self.cur, self.cur, self.cur)
+        self.admin_handler = AdminHandler(self, self.cur, self.cur, self.cur,self.cur)
 
 
         
@@ -188,11 +188,12 @@ class TeacherHandler:
         self.bot.send_message(message.chat.id, text="Добро пожаловать, учитель!", reply_markup=markup)
 
 class AdminHandler:
-    def __init__(self, my_bot, cur1, cur2, cur3):
+    def __init__(self, my_bot, cur1, cur2, cur3,cur4):
         self.my_bot = my_bot
         self.cur1 = cur1
         self.cur2 = cur2
         self.cur3 = cur3
+        self.cur4=cur4
         self.delete_query = "DELETE FROM Accounts WHERE Login = %s RETURNING role, accountsid;"
 
     def handle_admin(self, message):
@@ -213,7 +214,6 @@ class AdminHandler:
         try:
             name, surname, dob_str = map(str.strip, message.text.split(','))
             
-            # Проверка формата даты
             try:
                 dob = datetime.datetime.strptime(dob_str, "%Y-%m-%d").date()
             except ValueError:
@@ -225,7 +225,6 @@ class AdminHandler:
                 (name, surname, dob)
             )
             
-            # Коммит перед возвратом
             self.my_bot.conn.commit()
             student_id = self.cur1.fetchone()[0]
 
@@ -271,10 +270,11 @@ class AdminHandler:
         try:
             login, password, role = map(str.strip, message.text.split(','))
             self.cur1.execute('INSERT INTO Accounts (login, password, role) VALUES (%s, %s, %s) RETURNING accountsid;', (login, password, role))
-            accounts_id = self.cur1.fetchone()[0]
-
             self.my_bot.conn.commit()
+            accounts_id = self.cur1.fetchone()[0]
             self.my_bot.bot.send_message(message.chat.id, text=f'Пользователь {login} успешно добавлен в базу данных.')
+            
+            
 
         except Exception as e:
             print(e)
