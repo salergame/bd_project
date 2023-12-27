@@ -24,7 +24,7 @@ class MyTelegramBot:
         self.authenticated_users = {}
 
         self.question_handler = QuestionHandler(self.bot, self)
-        self.student_handler = StudentHandler(self.bot, self)
+        self.student_handler = StudentHandler(self.bot, self,self.cur,self.cur)
         self.teacher_handler = TeacherHandler(self.bot, self, self.cur, self.cur)
         self.admin_handler = AdminHandler(self, self.cur1, self.cur2, self.cur3, self.cur4)
 
@@ -56,12 +56,13 @@ class MyTelegramBot:
                     self.bot.send_message(chat_id, text="Введите свой логин и пароль через запятую: ")
                     self.bot.register_next_step_handler(message, self.authenticate)
                 else:
-                    # Пользователь уже аутентифицирован, перенаправляем в соответствующее меню
                     role = self.user_credentials[self.authenticated_users[chat_id]][1]
                     if role == "Студент":
-                        self.student_handler.handle_student_menu(message)
+                        if chat_id not in self.student_handler.student_info:
+                            self.student_handler.handle_student_menu(message)
+                        else:
+                            self.student_handler.handle_student_menu(message)
                     elif role == "Учитель":
-                        # Проверяем, предоставил ли учитель информацию о предмете во время предыдущего входа
                         if chat_id not in self.teacher_handler.subject_info:
                             self.teacher_handler.handle_teacher_menu(message)
                         else:
@@ -72,6 +73,11 @@ class MyTelegramBot:
 
             elif message.text == "Выход":
                 if chat_id in self.authenticated_users:
+                    role = self.user_credentials[self.authenticated_users[chat_id]][1]
+                    if role == "Студент":
+                        self.student_handler.student_info.pop(chat_id, None)
+                    elif role == "Учитель":
+                        self.teacher_handler.subject_info.pop(chat_id, None)
                     self.authenticated_users.pop(chat_id, None)
                     self.bot.send_message(chat_id, text="Вы успешно вышли из аккаунта.")
                     start(message)
@@ -95,29 +101,29 @@ class MyTelegramBot:
         chat_id = message.chat.id
         login, password = map(str.strip, message.text.split(','))
 
-        if login in self.user_credentials and self.user_credentials[login][0] == password:
-            self.authenticated_users[chat_id] = login
-            role = self.user_credentials[login][1]
+        login_lower = login.lower()
+
+        if login_lower in self.user_credentials and self.user_credentials[login_lower][0] == password:
+            self.authenticated_users[chat_id] = login_lower
+            role = self.user_credentials[login_lower][1]
 
             if role == "Студент":
                 self.student_handler.handle_student_menu(message)
             elif role == "Учитель":
-                teacher_id, subject_id, subject_name = self.get_teacher_info(login)
+                teacher_id, subject_id, subject_name = self.get_teacher_info(login_lower)
                 self.bot.send_message(chat_id, text=f"Вы успешно вошли в свой аккаунт с ролью {role}.")
                 self.teacher_handler.handle_teacher_menu(message, subject_id)
             elif role == "Админ":
                 self.admin_handler.handle_admin_menu(message)
 
-        else:
-            # Попробуйте найти пользователя в динамике
-            if login in self.user_credentials:
-                self.authenticated_users[chat_id] = login
-                role = self.user_credentials[login][1]
+            if login_lower in self.user_credentials:
+                self.authenticated_users[chat_id] = login_lower
+                role = self.user_credentials[login_lower][1]
 
                 if role == "Студент":
                     self.student_handler.handle_student_menu(message)
                 elif role == "Учитель":
-                    teacher_id, subject_id, subject_name = self.get_teacher_info(login)
+                    teacher_id, subject_id, subject_name = self.get_teacher_info(login_lower)
                     self.bot.send_message(chat_id, text=f"Вы успешно вошли в свой аккаунт с ролью {role}.")
                     self.teacher_handler.handle_teacher_menu(message, subject_id)
                 elif role == "Админ":
@@ -125,7 +131,6 @@ class MyTelegramBot:
             else:
                 self.authenticated_users[chat_id] = None
                 self.bot.send_message(chat_id, text="Ошибка входа. Пожалуйста, проверьте логин и пароль.")
-
     def get_teacher_info(self, login):
         query = """
             SELECT Teachers.TeacherID, Items.ItemID, Items.ItemName
@@ -163,20 +168,66 @@ class QuestionHandler:
             self.bot.send_message(message.chat.id, text="Вы вернулись в главное меню", reply_markup=markup)
 
 class StudentHandler:
-    def __init__(self, bot, my_bot):
+    def __init__(self, bot, my_bot,cur,cur1):
         self.bot = bot
         self.my_bot = my_bot
+        self.cur=cur
+        self.cur1=cur1
+        self.student_info = {}
 
     def handle_student(self, message):
-        if message.text == "Посмотреть предметы":
+        if message.text == "Посмотреть расписание":
             self.bot.send_message(message.chat.id, text="Список ваших предметов:")
+        elif message.text == "Список книг библиотеки университета":
+            books = self.get_books_from_library()
+            if books:
+                book_list_str = "\n".join([f"{book[1]} - {book[2]}" for book in books])
+                self.bot.send_message(message.chat.id, text=f"Список книг в библиотеке:\n{book_list_str}")
+            else:
+                self.bot.send_message(message.chat.id, text="В библиотеке нет доступных книг.")
+        elif message.text == "Посмотреть даты тестов":
+            query = "SELECT Tests.testdate, Items.itemname FROM Tests " \
+                        "LEFT JOIN Items ON Tests.itemid = Items.itemid "
+
+            self.cur.execute(query)
+            results = self.cur.fetchall()
+
+            if results:
+                for row in results:
+                    test_date, itemname = row
+                    self.bot.send_message(message.chat.id, f"{test_date}: {itemname}")
+            else:
+                self.bot.send_message(message.chat.id, "Нет данных насчет тестов.")
+        elif message.text == "Посмотреть даты экзаменов":
+            query1 = "SELECT Exams.examdate, Items.itemname FROM Exams " \
+                        "LEFT JOIN Items ON Exams.itemid = Items.itemid "
+
+            self.cur1.execute(query1)
+            results1 = self.cur1.fetchall()
+
+            if results1:
+                for row1 in results1:
+                    exam_date, itemname = row1
+                    self.bot.send_message(message.chat.id, f"{exam_date}: {itemname}")
+            else:
+                self.bot.send_message(message.chat.id, "Нет данных насчет экзаменов.")
+
+
+    def get_books_from_library(self):
+        query = "SELECT BookID, BookTitle, Author FROM Library"
+        self.my_bot.cur.execute(query)
+        books = self.my_bot.cur.fetchall()
+        return books
 
     def handle_student_menu(self, message):
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         button1 = types.KeyboardButton("Посмотреть предметы")
-        button2 = types.KeyboardButton("Выход")
+        button2 = types.KeyboardButton("Список книг библиотеки университета")
+        button3=types.KeyboardButton("Посмотреть даты тестов")
+        button4=types.KeyboardButton("Посмотреть даты экзаменов")
+        button_final = types.KeyboardButton("Выход")
         back = types.KeyboardButton("Вернуться в главное меню")
-        markup.add(button1, button2, back)
+        markup.add(button1, button2,button3,button4,button_final, back)
         self.bot.send_message(message.chat.id, text="Добро пожаловать, студент!", reply_markup=markup)
 
 class TeacherHandler:
@@ -214,8 +265,7 @@ class TeacherHandler:
             self.bot.register_next_step_handler(message, self.handle_view_student_grades)
         elif message.text == 'Выход':
             self.my_bot.bot.send_message(message.chat.id, "Выход")
-        else:
-            pass
+
 
     def handle_change_grade(self, message):
         try:
@@ -231,7 +281,7 @@ class TeacherHandler:
     def handle_view_student_grades(self, message):
         pass
 
-    def handle_teacher_menu(self, message, subject_id):
+    def handle_teacher_menu(self, message, subject_id=None):
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         button1 = types.KeyboardButton("Посмотреть журнал")
         button3 = types.KeyboardButton("Изменить оценку")
@@ -245,17 +295,11 @@ class TeacherHandler:
 class AdminHandler:
     def __init__(self, my_bot, cur1, cur2, cur3, cur4):
         self.my_bot = my_bot
-        self.cur1 = cur1
-        self.cur2 = cur2
-        self.cur3 = cur3
-        self.cur4 = cur4
+        self.cur1, self.cur2, self.cur3, self.cur4 = cur1, cur2, cur3, cur4
         self.delete_query = "DELETE FROM Accounts WHERE Login = %s RETURNING role, accountsid;"
 
     def get_users_list(self):
-        users = self.my_bot.user_credentials
-
-        users_info = "\n".join([f"{login}, {user[1][1]}" for login, user in users.items()])
-
+        users_info = "\n".join([f"{login}, {user[1][1]}" for login, user in self.my_bot.user_credentials.items()])
         return users_info
 
     def handle_admin(self, message):
@@ -265,69 +309,127 @@ class AdminHandler:
         elif message.text == 'Удалить пользователя':
             self.my_bot.bot.send_message(message.chat.id, text='Введите логин пользователя, которого хотите удалить:')
             self.my_bot.bot.register_next_step_handler(message, self.remove_user)
-    
-    def add_teacher(self, message, accounts_id):
+        elif message.text == 'Изменить расписание':
+            self.my_bot.bot.send_message(message.chat.id, text='Введите ID группы, для которой хотите изменить расписание:')
+            self.my_bot.bot.register_next_step_handler(message, self.handle_change_schedule)
+        elif message.text == 'Изменить мероприятия':
+            self.my_bot.bot.send_message(message.chat.id, text='Введите новое мероприятие и его дату через запятую (например, Мероприятие, 2023-12-31):')
+            self.my_bot.bot.register_next_step_handler(message, self.update_events_on_campus)
+
+    def handle_change_schedule(self, message):
         try:
-            name, surname, faculty_name, subject_id, optional_id = map(str.strip, message.text.split(','))
+            group_id = int(message.text.strip())  
+            group_query = "SELECT group_name FROM group_university WHERE groupsid = %s;"
+            self.cur2.execute(group_query, (group_id,))
+            group_name = self.cur2.fetchone()
 
-            self.cur1.execute('SELECT FacultyID FROM Faculties WHERE FacultyName = %s;', (faculty_name,))
-            faculty_id = self.cur1.fetchone()
-
-            if faculty_id:
-                faculty_id = faculty_id[0]
-
-                self.cur2.execute(
-                    'INSERT INTO Teachers (Name, Surname, FacultyID, AccountsID) VALUES (%s, %s, %s, %s) RETURNING TeacherID;',
-                    (name, surname, faculty_id, accounts_id)
-                )
-                teacher_id = self.cur2.fetchone()[0]
-
-                self.cur3.execute(
-                    'INSERT INTO TeachersSubjects (TeacherID, SubjectID, OptionalID) VALUES %s;', [(teacher_id, subject_id, optional_id)])
-
-                self.my_bot.conn.commit()
-                self.my_bot.bot.send_message(message.chat.id,
-                                            text=f'Учитель {name} успешно добавлен в базу данных с ID {teacher_id}.')
+            if group_name:
+                self.my_bot.bot.send_message(message.chat.id, text=f'Выбрана группа: {group_name[0]}')
+                self.my_bot.bot.send_message(message.chat.id, text='Введите день недели (например, Понедельник):')
+                self.my_bot.bot.register_next_step_handler(message, lambda msg: self.choose_day_and_time_for_schedule_change(msg, group_id))
             else:
-                self.my_bot.bot.send_message(message.chat.id, text=f'Факультет {faculty_name} не найден.')
+                self.my_bot.bot.send_message(message.chat.id, text='Группа с указанным ID не найдена.')
 
-        except Exception as e:
-            print(e)
-            self.my_bot.conn.rollback()
-            self.my_bot.bot.send_message(message.chat.id, text='Ошибка при добавлении учителя')
+        except ValueError:
+            self.my_bot.bot.send_message(message.chat.id, text='Введите корректный ID группы (целое число).')
 
-    def add_student(self, message, accounts_id):
+    def choose_day_and_time_for_schedule_change(self, message, group_id):
         try:
-            name, surname, dob_str, optional_id = map(str.strip, message.text.split(','))
+            chosen_day = message.text.strip()
+            days_of_week = ['Monday', 'Tuesday', 'Wensday', 'Thursday', 'Friday']
 
-            try:
-                dob = datetime.datetime.strptime(dob_str, "%Y-%m-%d").date()
-            except ValueError:
-                self.my_bot.bot.send_message(message.chat.id, text='Неверный формат даты. Используйте формат: YYYY-MM-DD.')
-                return
+            markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+            for day in days_of_week:
+                markup.add(types.KeyboardButton(day))
+            self.my_bot.bot.send_message(message.chat.id, text='Выберите день недели:', reply_markup=markup)
+            self.my_bot.bot.register_next_step_handler(message, lambda msg: self.choose_time_for_schedule_change(msg, group_id, chosen_day))
 
-            self.cur1.execute(
-                'INSERT INTO Students (Name, Surname, DateOfBirth, OptionalID, AccountsID) VALUES (%s, %s, %s, %s, %s) RETURNING StudentID;',
-                (name, surname, dob, optional_id, accounts_id)
-            )
+        except ValueError:
+            self.my_bot.bot.send_message(message.chat.id, text='Неверный день недели.')
 
+    def choose_time_for_schedule_change(self, message, group_id, chosen_day):
+        try:
+            query = """
+                SELECT DISTINCT StartTime
+                FROM ClassSchedule
+                WHERE groupsid = %s AND DayOfWeek = %s
+                ORDER BY StartTime;
+            """
+            self.cur2.execute(query, (group_id, chosen_day))
+            results = self.cur2.fetchall()
+
+            available_times = [result[0].strftime('%H:%M:%S') for result in results]
+
+            markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+            for available_time in available_times:
+                markup.add(types.KeyboardButton(available_time))
+            self.my_bot.bot.send_message(message.chat.id, text='Выберите точное время:', reply_markup=markup)
+            self.my_bot.bot.register_next_step_handler(message, lambda msg: self.choose_item_for_schedule_change(msg, group_id, chosen_day))
+
+        except ValueError:
+            self.my_bot.bot.send_message(message.chat.id, text='Ошибка при выборе времени.')
+
+    def choose_item_for_schedule_change(self, message, group_id, chosen_day):
+        try:
+            chosen_time = message.text.strip()
+            items = self.get_items()
+
+            markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+            for item in items:
+                markup.add(types.KeyboardButton(item))
+            self.my_bot.bot.send_message(message.chat.id, text='Выберите предмет:', reply_markup=markup)
+            self.my_bot.bot.register_next_step_handler(message, lambda msg: self.update_schedule(msg, group_id, chosen_day, chosen_time))
+
+        except ValueError:
+            self.my_bot.bot.send_message(message.chat.id, text='Ошибка при выборе предмета.')
+
+    def update_schedule(self, message, group_id, chosen_day, chosen_time):
+        try:
+            chosen_item = message.text.strip()
+
+            get_item_id_query = "SELECT ItemID FROM Items WHERE ItemName = %s;"
+            self.cur3.execute(get_item_id_query, (chosen_item,))
+            item_id = self.cur3.fetchone()[0]
+
+            update_schedule_query = """
+                UPDATE ClassSchedule
+                SET ItemID = %s
+                WHERE groupsid = %s AND DayOfWeek = %s AND StartTime = %s;
+            """
+
+            self.cur4.execute(update_schedule_query, (item_id, group_id, chosen_day, chosen_time))
             self.my_bot.conn.commit()
-            student_id = self.cur1.fetchone()[0]
 
-            self.my_bot.bot.send_message(message.chat.id, text=f'Студент {name} успешно добавлен в базу данных с ID {student_id}.')
+            self.my_bot.bot.send_message(message.chat.id, text='Расписание успешно изменено.')
 
-        except Exception as e:
-            print(e)
-            self.my_bot.conn.rollback()
-            self.my_bot.bot.send_message(message.chat.id, text='Ошибка при добавлении студента')
+        except ValueError:
+            self.my_bot.bot.send_message(message.chat.id, text='Неверный предмет.')
 
+    def get_items(self):
+        query = "SELECT ItemName FROM Items"
+        self.cur1.execute(query)
+        items = [row[0] for row in self.cur1.fetchall()]
+        return items
 
+    def update_events_on_campus(self, message):
+        try:
+            event_name, event_date = map(str.strip, message.text.split(','))
+            update_query = "INSERT INTO EventsOnCampus (EventName, EventDate) VALUES (%s, %s) RETURNING EventID;"
+            self.cur3.execute(update_query, (event_name, event_date))
+            event_id = self.cur3.fetchone()[0]
+            self.my_bot.conn.commit()
+
+            self.my_bot.bot.send_message(message.chat.id, text=f'Мероприятие успешно изменено.')
+
+        except ValueError:
+            self.my_bot.bot.send_message(message.chat.id, text='Неверный формат данных для мероприятия.')
+    
     def add_user(self, message):
         try:
             login, password, role = map(str.strip, message.text.split(','))
-            self.cur1.execute('INSERT INTO Accounts (login, password, role) VALUES (%s, %s, %s) RETURNING accountsid;', (login, password, role))
+            self.cur2.execute('INSERT INTO Accounts (login, password, role) VALUES (%s, %s, %s) RETURNING accountsid;', (login, password, role))
             self.my_bot.conn.commit()
-            accounts_id = self.cur1.fetchone()[0]
+            accounts_id = self.cur2.fetchone()[0]
 
             self.my_bot.user_credentials[login] = (password, role)
 
@@ -341,8 +443,8 @@ class AdminHandler:
     def remove_user(self, message):
         try:
             login = message.text.strip()
-            result = self.cur2.execute(self.delete_query, (login,))
-            result = self.cur2.fetchone()
+            result = self.cur3.execute(self.delete_query, (login,))
+            result = self.cur3.fetchone()
             if result:
                 role, accounts_id = result
                 self.my_bot.conn.commit()
@@ -357,9 +459,11 @@ class AdminHandler:
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         button1 = types.KeyboardButton("Добавить пользователя")
         button2 = types.KeyboardButton("Удалить пользователя")
+        button3 = types.KeyboardButton("Изменить расписание")
+        button4 = types.KeyboardButton("Изменить мероприятия")  # Новая кнопка
         button_exit = types.KeyboardButton("Выход")
         back = types.KeyboardButton("Вернуться в главное меню")
-        markup.add(button1, button2, button_exit, back)
+        markup.add(button1, button2, button3, button4, button_exit, back)
         self.my_bot.bot.send_message(message.chat.id, text="Добро пожаловать, администратор!", reply_markup=markup)
 
 
