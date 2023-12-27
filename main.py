@@ -176,15 +176,16 @@ class StudentHandler:
         self.student_info = {}
 
     def handle_student(self, message):
-        if message.text == "Посмотреть расписание":
-            self.bot.send_message(message.chat.id, text="Список ваших предметов:")
-        elif message.text == "Список книг библиотеки университета":
+        if message.text == "Список книг библиотеки университета":
             books = self.get_books_from_library()
             if books:
                 book_list_str = "\n".join([f"{book[1]} - {book[2]}" for book in books])
                 self.bot.send_message(message.chat.id, text=f"Список книг в библиотеке:\n{book_list_str}")
             else:
                 self.bot.send_message(message.chat.id, text="В библиотеке нет доступных книг.")
+        elif message.text == "Посмотреть расписание":
+            self.bot.send_message(message.chat.id, text="Введите ID вашей группы:")
+            self.bot.register_next_step_handler(message, self.handle_enter_group_id)
         elif message.text == "Посмотреть даты тестов":
             query = "SELECT Tests.testdate, Items.itemname FROM Tests " \
                         "LEFT JOIN Items ON Tests.itemid = Items.itemid "
@@ -212,7 +213,29 @@ class StudentHandler:
             else:
                 self.bot.send_message(message.chat.id, "Нет данных насчет экзаменов.")
 
+    
+    def handle_enter_group_id(self, message):
+        try:
+            group_id = int(message.text.strip())
+            # Здесь можно провести дополнительные проверки, например, существование группы и принадлежность студента к ней
 
+            # Запрос для получения расписания по группе
+            query_schedule = "SELECT cs.DayOfWeek, cs.StartTime, cs.EndTime, i.itemname, a.audiencenumber " \
+                             "FROM ClassSchedule cs " \
+                             "JOIN Items i ON cs.ItemID = i.ItemID " \
+                             "JOIN Audience a ON cs.AudienceID = a.AudienceID " \
+                             "WHERE cs.groupsid = %s;"
+
+            self.cur.execute(query_schedule, (group_id,))
+            schedule_results = self.cur.fetchall()
+
+            if schedule_results:
+                schedule_str = "\n".join([f"{row[0]}, {row[1]} - {row[2]}, {row[3]}, {row[4]}" for row in schedule_results])
+                self.bot.send_message(message.chat.id, text=f"Расписание для вашей группы:\n{schedule_str}")
+            else:
+                self.bot.send_message(message.chat.id, text="Нет доступного расписания для вашей группы.")
+        except ValueError:
+            self.bot.send_message(message.chat.id, text="Введите корректный ID группы (целое число).")
     def get_books_from_library(self):
         query = "SELECT BookID, BookTitle, Author FROM Library"
         self.my_bot.cur.execute(query)
@@ -221,7 +244,7 @@ class StudentHandler:
 
     def handle_student_menu(self, message):
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        button1 = types.KeyboardButton("Посмотреть предметы")
+        button1 = types.KeyboardButton("Посмотреть рассписание")
         button2 = types.KeyboardButton("Список книг библиотеки университета")
         button3=types.KeyboardButton("Посмотреть даты тестов")
         button4=types.KeyboardButton("Посмотреть даты экзаменов")
@@ -244,7 +267,7 @@ class TeacherHandler:
         if message.text == 'Посмотреть журнал':
             if subject_id:
                 query = "SELECT Students.name, Ratings.grade FROM Students " \
-                        "LEFT JOIN Ratings ON Students.studentid = Ratings.studentid " \
+                        "LEFT JOIN Ratings ON Students.studentid = Ratings.studentsid " \
                         "WHERE Ratings.itemid IN (SELECT Items.ItemID FROM Items WHERE Items.ItemID = %s);"
                 self.cur3.execute(query, (subject_id,))
                 results = self.cur3.fetchall()
@@ -257,38 +280,34 @@ class TeacherHandler:
                     self.bot.send_message(message.chat.id, "Нет данных в журнале.")
             else:
                 self.bot.send_message(message.chat.id, "Учитель не связан ни с одним предметом. Обратитесь к администратору.")
-        elif message.text == 'Изменить оценку':
-            self.bot.send_message(message.chat.id, "Введите имя студента и новую оценку через запятую:")
-            self.bot.register_next_step_handler(message, self.handle_change_grade)
-        elif message.text == 'Посмотреть оценки студента':
-            self.bot.send_message(message.chat.id, "Введите ID студента для просмотра оценок:")
-            self.bot.register_next_step_handler(message, self.handle_view_student_grades)
+            self.bot.register_next_step_handler(message, lambda msg: self.handle_change_grade(msg, subject_id))  # Используем lambda для передачи параметра
+        elif message.text == 'Получение списка студентов группы':
+            self.bot.send_message(message.chat.id, text='Введите ID группы, чтобы получить список студентов:')
+            self.bot.register_next_step_handler(message, self.get_students_for_group)
         elif message.text == 'Выход':
             self.my_bot.bot.send_message(message.chat.id, "Выход")
 
+    
 
-    def handle_change_grade(self, message):
-        try:
-            student_name, new_grade = map(str.strip, message.text.split(','))
 
-            update_query = "UPDATE Ratings SET grade = %s WHERE studentid = (SELECT studentid FROM Students WHERE name = %s) OR grade IS NULL;"
-            self.cur3.execute(update_query, (new_grade, student_name))
-            self.my_bot.conn.commit()
-            self.bot.send_message(message.chat.id, f"Оценка для студента {student_name} успешно изменена на {new_grade}.")
-        except:
-            self.bot.send_message(message.chat.id, "Ошибка при изменении оценки. Пожалуйста, проверьте ввод.")
 
-    def handle_view_student_grades(self, message):
-        pass
 
+    def get_students_in_group(self, group_id):
+        query = "SELECT Students.name, Students.studentid FROM Students " \
+                "JOIN groups ON Students.studentid = groups.studentid " \
+                "JOIN group_university ON groups.groupsid = group_university.groupsid " \
+                "WHERE group_university.groupsid = %s;"
+        self.cur5.execute(query, (group_id,))
+        students = self.cur5.fetchall()
+        return students
+    
     def handle_teacher_menu(self, message, subject_id=None):
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         button1 = types.KeyboardButton("Посмотреть журнал")
-        button3 = types.KeyboardButton("Изменить оценку")
-        button4 = types.KeyboardButton("Посмотреть оценки студента")
+        button4 = types.KeyboardButton("Получение списка студентов группы")
         button2 = types.KeyboardButton("Выход")
         back = types.KeyboardButton("Вернуться в главное меню")
-        markup.add(button1, button2, button3, button4, back)
+        markup.add(button1, button2,button4, back)
         self.bot.send_message(message.chat.id, text="Добро пожаловать, учитель!", reply_markup=markup)
 
 
